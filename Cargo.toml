@@ -1,8 +1,14 @@
 [package]
-name = "S5-rust"
+name = "s5_rust"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+base58 = "0.2.0"
+rand = "0.8.5"
+serde = { version = "1.0.145", features = ["derive"] }
+tokio = { version= "1.21.2", features = ["full"] }
+toml = "0.5.9"
+warp = "0.3.3"
