@@ -1,38 +1,54 @@
 pub mod config {
     use serde::Deserialize;
-
-    #[derive(Deserialize, Debug)]
+    
+    #[derive(Deserialize, Debug, Clone)]
     pub struct Config {
         pub name: String,
         pub keypair: KeyPair,
+        pub database: DataBase,
         pub cache: Cache,
-        pub http_api: HttpAPI,
-        pub http_api_delete: HttpApiDelete,
-        pub network_peers: NetworkPeers,
+        pub http: Http,
+        pub network: Network,
     }
 
-    #[derive(Deserialize, Debug)]
+    #[derive(Deserialize, Debug, Clone)]
     pub struct KeyPair {
         pub seed: String,
     }
-
-    #[derive(Deserialize, Debug)]
-    pub struct Cache {
+    
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct DataBase {
         pub path: String,
     }
 
-    #[derive(Deserialize, Debug)]
-    pub struct HttpAPI {
-        pub port: i64,
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct Cache {
+        pub path: String,
+    }
+    
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct Http {
+        pub api: API,
     }
 
-    #[derive(Deserialize, Debug)]
-    pub struct HttpApiDelete {
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct API {
+        pub port: i64,
+        pub delete: Delete,
+    }
+
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct Delete {
         pub enabled: bool,
     }
+    
+     #[derive(Deserialize, Debug, Clone)]
+     pub struct Network {
+         pub peers: Peers,
+     }
 
-    #[derive(Deserialize, Debug)]
-    pub struct NetworkPeers {
+    #[derive(Deserialize, Debug, Clone)]
+    pub struct Peers {
         pub initial: Vec<String>,
     }
 }

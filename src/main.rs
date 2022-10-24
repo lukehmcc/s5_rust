@@ -3,7 +3,7 @@ use rand::{thread_rng, Rng};
 use base58::{self, ToBase58};
 
 mod modules;
-use modules::Config;
+use modules::{Config,Node};
 
 #[tokio::main]
 async fn main() {
@@ -29,5 +29,8 @@ async fn main() {
     }
     let config = fs::read_to_string(&args[1]).expect("Failed to read config file");
     let config_toml: Config = toml::from_str(&config).unwrap();
-    println!("{:?}", config_toml);
+    let node: Node = Node{
+        config: config_toml,
+    };
+    node.start_node().await;
 }

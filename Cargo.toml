@@ -7,8 +7,14 @@ edition = "2021"
 
 [dependencies]
 base58 = "0.2.0"
+concat-arrays = "0.1.2"
+ed25519-dalek = "1.0.1"
+hex = "0.4.3"
 rand = "0.8.5"
+rand_core = "0.6.4"
 serde = { version = "1.0.145", features = ["derive"] }
+sha2 = "0.10.6"
+sled = "0.34.7"
 tokio = { version= "1.21.2", features = ["full"] }
 toml = "0.5.9"
 warp = "0.3.3"
