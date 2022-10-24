@@ -3,7 +3,7 @@ use rand::{thread_rng, Rng};
 use base58::{self, ToBase58};
 
 mod modules;
-use modules::{Config,Node};
+use modules::{Node, Config};
 
 #[tokio::main]
 async fn main() {
