@@ -1,6 +1,5 @@
 use std::{env, fs, process::exit};
 use rand::{thread_rng, Rng};
-use base58::{self, ToBase58};
 
 mod modules;
 use modules::{Node, Config};
@@ -23,7 +22,7 @@ async fn main() {
         let numbers: Vec<u8> = (0..64).map(|_| {
             rng.gen()
         }).collect();
-        config = config.replace("AUTOMATICALLY_GENERATED_ON_FIRST_START", &numbers.to_base58());
+        config = config.replace("AUTOMATICALLY_GENERATED_ON_FIRST_START", &bs58::encode(numbers.to_ascii_lowercase()).into_string());
         fs::write(&args[1], config).expect("Failed to write seed to config");
         println!("Sucsessfully generated and inserted seed.")
     }

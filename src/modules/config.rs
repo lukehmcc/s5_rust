@@ -48,7 +48,9 @@ pub mod config {
     
      #[derive(Deserialize, Debug, Clone)]
      pub struct P2P {
-         pub peers: Peers,
+         pub peers: Peers, 
+         #[serde(rename = "self")]
+         pub self_id: Option<String>,
      }
 
     #[derive(Deserialize, Debug, Clone)]
