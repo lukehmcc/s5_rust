@@ -2,8 +2,8 @@ pub mod p2p {
     use concat_arrays::concat_arrays;
     use sha2::{Digest, Sha512};
     use sled::Db;
+    use tokio::{net::TcpStream, io::{AsyncWriteExt, Interest, self}};
     use url::Url;
-    use std::net::TcpStream;
     use rand::{thread_rng, Rng};
     
     use crate::modules::{Config, SledWrappings, Constants};
@@ -49,17 +49,55 @@ pub mod p2p {
                 tokio::task::spawn(P2PService::connect_to_node(self.clone(), peer));
             }
         }
-        pub async fn on_new_peer(socket: TcpStream, connection_uri: Url) {
-            let mut rng = thread_rng();
-            let challenge: Vec<u8> = (0..32).map(|_| {
-                rng.gen()
-            }).collect();
-            let constants: Constants = Constants::get_constants();
-        }
+        pub async fn on_new_peer(addr: String, _connection_uri: Url) {
+            let stream_res = TcpStream::connect(&addr).await;
+            if stream_res.is_ok(){
+                println!("connecting to: {}", &addr);
+                let mut stream = stream_res.expect("failed to unwrap stream");
+                let challenge: Vec<u8> = (0..32).map(|_| {
+                    thread_rng().gen::<u8>()
+                }).collect();
+                let constants: Constants = Constants::get_constants();
+                let mut initial_auth_payload_packer: Vec<u8> = Vec::new();
+                rmp::encode::write_u8(&mut initial_auth_payload_packer, constants.protocol_method_handshake_open).expect("Failed to pack");
+                rmp::encode::write_bin(&mut initial_auth_payload_packer, &challenge[..]).expect("failed to pack");
+                match stream.write_all(&initial_auth_payload_packer[..]).await {
+                    Ok(back) => {println!("{:?}", back)},
+                    Err(err ) => {println!("{}", err);return;},
+                }
+                // now loop until the heck out of it
+                loop {
+                    dbg!("looping");
+                    let ready = stream.ready(Interest::READABLE).await;
+                    if ready.is_ok(){
+                    let ready_ok = ready.unwrap();
+                    if ready_ok.is_readable() {
+                        let mut data = vec![0; 1024];
+                        // Try to read data, this may still fail with `WouldBlock`
+                        // if the readiness event is a false positive.
+                        match stream.try_read(&mut data) {
+                            Ok(n) => {
+                                println!("read {} bytes", n);        
+                            }
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                continue;
+                            }
+                            Err(e) => {
+                                dbg!(e);
+                                return;
+                            }
+                        }
+                    }                                
+                }
+            }            
+        } else {
+            println!("failed to conenct to: {}", &addr);
+            return;
+        }}
         pub fn encode_node_id(node_id_bytes: Vec<u8>) -> String {
             return format!("{}{}", "z".to_owned(), bs58::encode(node_id_bytes).into_string());
         }
-        pub async fn connect_to_node(self, peer: String){
+        pub async fn connect_to_node(self, peer: String) {
             let parsed_peer: Option<Url> = match Url::parse(&peer) {
               Ok(parsed) => Some(parsed),
               Err(_) => None, 
@@ -91,14 +129,16 @@ pub mod p2p {
                 let mut addr = ip;
                 addr.push_str(":");
                 addr.push_str(&port.to_string());
-                if let Ok(stream) = TcpStream::connect(addr.clone()) {
-                    println!("connecting to: {:?}", addr.clone());
-                    println!("Connected to the server!");
-                    tokio::task::spawn(P2PService::on_new_peer(stream, peer_uri));
-                } else {
-                    println!("connecting to: {:?}", addr);
-                    println!("Couldn't connect to server...");
-                }
+                tokio::task::spawn(P2PService::on_new_peer(addr, peer_uri));
+                // let stream = TcpStream::connect(addr.clone());
+                // if stream.await.is.is_ok() {
+                //     println!("connecting to: {:?}", addr.clone());
+                //     println!("Connected to the server!");
+                //     tokio::task::spawn(P2PService::on_new_peer(listener.unwrap(), peer_uri));
+                // } else {
+                //     println!("connecting to: {:?}", addr);
+                //     println!("Couldn't connect to server...");
+                // }
             }
         }
     }
