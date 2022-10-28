@@ -1,6 +1,6 @@
 pub mod node {
 
-    use crate::{modules::{Config, P2PService}};
+    use crate::modules::{Config, P2PService};
     pub struct Node{
         pub config: Config,
     }
@@ -26,7 +26,9 @@ pub mod node {
                 config: self.config.clone(),
                 sled: _sled.clone(),
             };
-            p2p.start().await;
+            tokio::task::spawn(p2p.start());
+            // keeps the program alive
+            loop {}
         }
     }  
 }
