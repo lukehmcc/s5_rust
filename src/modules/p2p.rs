@@ -5,6 +5,7 @@ pub mod p2p {
     use tokio::{net::TcpStream, io::{AsyncWriteExt, Interest, self}};
     use url::Url;
     use rand::{thread_rng, Rng};
+    use rmp::{encode,decode};
     
     use crate::modules::{Config, SledWrappings, Constants};
     
@@ -52,8 +53,11 @@ pub mod p2p {
         pub async fn on_new_peer(addr: String, _connection_uri: Url) {
             let stream_res = TcpStream::connect(&addr).await;
             if stream_res.is_ok(){
+                // if the stream is okay we pack the handshake open call and the challenge then send it off to the peer
                 println!("connecting to: {}", &addr);
                 let mut stream = stream_res.expect("failed to unwrap stream");
+                // the challenge here is a random value that is expected to be sent back by the peer to verify they are using
+                // the same protocol
                 let challenge: Vec<u8> = (0..32).map(|_| {
                     thread_rng().gen::<u8>()
                 }).collect();
@@ -62,12 +66,10 @@ pub mod p2p {
                 rmp::encode::write_u8(&mut initial_auth_payload_packer, constants.protocol_method_handshake_open).expect("Failed to pack");
                 rmp::encode::write_bin(&mut initial_auth_payload_packer, &challenge[..]).expect("failed to pack");
                 match stream.write_all(&initial_auth_payload_packer[..]).await {
-                    Ok(back) => {println!("{:?}", back)},
-                    Err(err ) => {println!("{}", err);return;},
+                    Ok(_) => {},
+                    Err(err ) => {println!("writing failure: {}", err);return;},
                 }
-                // now loop until the heck out of it
                 loop {
-                    dbg!("looping");
                     let ready = stream.ready(Interest::READABLE).await;
                     if ready.is_ok(){
                     let ready_ok = ready.unwrap();
@@ -76,8 +78,25 @@ pub mod p2p {
                         // Try to read data, this may still fail with `WouldBlock`
                         // if the readiness event is a false positive.
                         match stream.try_read(&mut data) {
-                            Ok(n) => {
-                                println!("read {} bytes", n);        
+                            Ok(_n) => {
+                                let method: u8 = decode::read_int(&mut &data[..]).expect("failed to unwrap rmp decode");
+                                println!("method call: {}", method);
+                                if method == constants.protocol_method_handshake_open {
+                                    // when handshake open is received you send back "handshake_done", the challenge, 
+                                    // the length of conenction uris, and each connection uri as a string
+                                    // in our case we only support 1 connection uri
+                                    let mut packer: Vec<u8> = Vec::new();
+                                    encode::write_u8(&mut packer, constants.protocol_method_handshake_done).expect("packing const failed");
+                                    let challenge_bytes_val = rmpv::decode::read_value_ref(&mut &data[1..]).unwrap().to_owned();
+                                    let challenge_bytes_slice  = challenge_bytes_val.as_slice().expect("expected challege slice to exist");
+                                    encode::write_bin(&mut packer, challenge_bytes_slice).expect("writing challnge failed");
+                                    encode::write_u8(&mut packer, 1).expect("packing const failed"); // this is because only 1 url is supported per peer
+                                    encode::write_str(&mut packer, &format!("tcp://{}",&addr)).expect("writing string to packer failed");
+                                    match stream.write_all(&packer[..]).await {
+                                        Ok(_) => {},
+                                        Err(err ) => {println!("writing failure: {}", err);return;},
+                                    }
+                                }
                             }
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                                 continue;
