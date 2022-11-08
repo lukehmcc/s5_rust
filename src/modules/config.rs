@@ -1,9 +1,9 @@
 pub mod config {
-    use serde::Deserialize;
+    use serde::{Serialize, Deserialize};
     use std::collections::HashMap;
 
     
-    #[derive(Deserialize, Debug, Clone)]
+    #[derive(Deserialize, Serialize, Debug, Clone)]
     pub struct Config {
         pub name: String,
         pub keypair: KeyPair,
@@ -15,50 +15,50 @@ pub mod config {
         
     }
 
-    #[derive(Deserialize, Debug, Clone)]
+    #[derive(Deserialize, Serialize, Debug, Clone)]
     pub struct KeyPair {
         pub seed: String,
     }
     
-    #[derive(Deserialize, Debug, Clone)]
+    #[derive(Deserialize, Serialize, Debug, Clone)]
     pub struct DataBase {
         pub path: String,
     }
 
-    #[derive(Deserialize, Debug, Clone)]
+    #[derive(Deserialize, Serialize, Debug, Clone)]
     pub struct Cache {
         pub path: String,
     }
     
-    #[derive(Deserialize, Debug, Clone)]
+    #[derive(Deserialize, Serialize, Debug, Clone)]
     pub struct Http {
         pub api: API,
     }
 
-    #[derive(Deserialize, Debug, Clone)]
+    #[derive(Deserialize, Serialize, Debug, Clone)]
     pub struct API {
         pub port: i64,
         pub delete: Delete,
     }
 
-    #[derive(Deserialize, Debug, Clone)]
+    #[derive(Deserialize, Serialize, Debug, Clone)]
     pub struct Delete {
         pub enabled: bool,
     }
     
-     #[derive(Deserialize, Debug, Clone)]
-     pub struct P2P {
+    #[derive(Deserialize, Serialize, Debug, Clone)]
+    pub struct P2P {
          pub peers: Peers, 
          #[serde(rename = "self")]
          pub self_id: Option<String>,
      }
 
-    #[derive(Deserialize, Debug, Clone)]
+    #[derive(Deserialize, Serialize, Debug, Clone)]
     pub struct Peers {
         pub initial: Vec<String>,
     }
     
-    #[derive(Deserialize, Debug, Clone)]
+    #[derive(Deserialize, Serialize, Debug, Clone)]
     pub struct Store {
         pub expose: bool,
         pub s3: Option<HashMap<String, String>>,

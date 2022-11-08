@@ -1,5 +1,10 @@
 pub mod p2p {
+    use std::io::Cursor;
+
     use concat_arrays::concat_arrays;
+    use ed25519_dalek::{Keypair, Signature, PublicKey, Verifier};
+    use rmpv::Value;
+    use std::error::Error;
     use sha2::{Digest, Sha512};
     use sled::Db;
     use tokio::{net::TcpStream, io::{AsyncWriteExt, Interest, self}};
@@ -16,29 +21,32 @@ pub mod p2p {
     }
     
     #[derive(Debug)]
-    pub struct Peer {
-        pub id: String,
-        pub id_bin: Vec<u8>,
-        pub socket: TcpStream,
-        pub connection_uri: Url,
-        pub connected_peers: Vec<String>,
-        pub challenge: Vec<u8>, // This should be 32 bytes in length
+    pub struct SignedMessage {
+        pub node_id: String,
+        pub message: Vec<u8>,
     }
+    
+    #[derive(Debug)]
+    pub struct StringError (String);
     
     impl P2PService {
         //  Use this for protocol updates
         pub async fn init(self){
             // Generate Sha256 pubkey based on seed and set it to the node_id
-            let mut hasher = Sha512::new();
-            hasher.update(self.config.keypair.seed.as_bytes());
-            let hashed_seed = hasher.finalize();
-            let pk:ed25519_dalek::Keypair = ed25519_dalek::Keypair::from_bytes(&hashed_seed).expect("Seed should be available");
+            let kp: Keypair = P2PService::get_keypair(self.clone());
             let constants: Constants = Constants::get_constants();
             let prefix: [u8;1] = [constants.mkey_ed25519];
-            let node_id_bin: [u8; 33] = concat_arrays!(prefix, pk.public.to_bytes());
+            let node_id_bin: [u8; 33] = concat_arrays!(prefix, kp.public.to_bytes());
             let node_id_bs58: String = P2PService::encode_node_id(node_id_bin.to_vec());
             println!("Local node id: {}", node_id_bs58);
             self.sled.insert("local_node_id", node_id_bin.to_vec()).expect("");
+        }
+        pub fn get_keypair(p2p: P2PService) -> Keypair {
+            let mut hasher = Sha512::new();
+            hasher.update(p2p.config.keypair.seed.as_bytes());
+            let hashed_seed = hasher.finalize();
+            let kp:ed25519_dalek::Keypair = ed25519_dalek::Keypair::from_bytes(&hashed_seed).expect("Seed should be available");
+            return kp;
         }
         pub async fn start(self){
             // TODO add section for if p2p.self is configured
@@ -50,7 +58,7 @@ pub mod p2p {
                 tokio::task::spawn(P2PService::connect_to_node(self.clone(), peer));
             }
         }
-        pub async fn on_new_peer(addr: String, _connection_uri: Url) {
+        pub async fn on_new_peer(addr: String, _connection_uri: Url, p2p: P2PService) {
             let stream_res = TcpStream::connect(&addr).await;
             if stream_res.is_ok(){
                 // if the stream is okay we pack the handshake open call and the challenge then send it off to the peer
@@ -79,23 +87,10 @@ pub mod p2p {
                         // if the readiness event is a false positive.
                         match stream.try_read(&mut data) {
                             Ok(_n) => {
-                                let method: u8 = decode::read_int(&mut &data[..]).expect("failed to unwrap rmp decode");
-                                println!("method call: {}", method);
-                                if method == constants.protocol_method_handshake_open {
-                                    // when handshake open is received you send back "handshake_done", the challenge, 
-                                    // the length of conenction uris, and each connection uri as a string
-                                    // in our case we only support 1 connection uri
-                                    let mut packer: Vec<u8> = Vec::new();
-                                    encode::write_u8(&mut packer, constants.protocol_method_handshake_done).expect("packing const failed");
-                                    let challenge_bytes_val = rmpv::decode::read_value_ref(&mut &data[1..]).unwrap().to_owned();
-                                    let challenge_bytes_slice  = challenge_bytes_val.as_slice().expect("expected challege slice to exist");
-                                    encode::write_bin(&mut packer, challenge_bytes_slice).expect("writing challnge failed");
-                                    encode::write_u8(&mut packer, 1).expect("packing const failed"); // this is because only 1 url is supported per peer
-                                    encode::write_str(&mut packer, &format!("tcp://{}",&addr)).expect("writing string to packer failed");
-                                    match stream.write_all(&packer[..]).await {
-                                        Ok(_) => {},
-                                        Err(err ) => {println!("writing failure: {}", err);return;},
-                                    }
+                                let packed = P2PService::handle_stream_data(data,addr.clone(),p2p.clone()).await.unwrap();
+                                match stream.write_all(&packed[..]).await {
+                                    Ok(_) => {},
+                                    Err(err ) => {println!("writing failure: {}", err);return;},
                                 }
                             }
                             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -108,11 +103,65 @@ pub mod p2p {
                         }
                     }                                
                 }
+                // TODO implement recconect on dropped connection
             }            
         } else {
             println!("failed to conenct to: {}", &addr);
             return;
         }}
+        pub async fn handle_stream_data(data: Vec<u8>, addr: String, p2p: P2PService) -> Result<Vec<u8>, Box<dyn Error>> {
+            let mut cursor = Cursor::new(data);
+            let method: u8 = decode::read_int(&mut cursor).expect("failed to unwrap rmp decode");
+            println!("method call: {}", method);
+            let constants = Constants::get_constants();
+            
+            if method == constants.protocol_method_handshake_open {
+                // when handshake open is received you send back "handshake_done", the challenge, 
+                // the length of conenction uris, and each connection uri as a string
+                // in our case we only support 1 connection uri
+                let mut packer: Vec<u8> = Vec::new();
+                encode::write_u8(&mut packer, constants.protocol_method_handshake_done).expect("packing const failed");
+                let challenge_bytes_val = rmpv::decode::read_value(&mut cursor).unwrap().to_owned();
+                let challenge_bytes_slice  = challenge_bytes_val.as_slice().expect("expected challege slice to exist");
+                encode::write_bin(&mut packer, challenge_bytes_slice).expect("writing challnge failed");
+                encode::write_u8(&mut packer, 1).expect("packing const failed"); // this is because only 1 url is supported per peer
+                encode::write_str(&mut packer, &format!("tcp://{}",&addr)).expect("writing string to packer failed");
+                return Ok(packer);
+            } else if method == constants.protocol_method_registry_update {
+                // TODO implement registry
+            }
+            if method == constants.protocol_methods_signed_message {
+                // TODO implement -> next up on docket
+                let signed_message: SignedMessage = P2PService::unpack_and_verify_signature(cursor).await.unwrap();
+                let _sm_cursor = Cursor::new(signed_message.message);
+                
+                
+            } else if method == constants.protocol_method_hash_query {
+                // TODO implement
+            } else if method == constants.protocol_method_registry_query {
+                // TODO implement
+            }
+            Ok(Vec::new())
+        }
+        pub async fn unpack_and_verify_signature(message: Cursor<Vec<u8>>) -> Result<SignedMessage, Box<dyn Error>>{
+            let mut message_mut: Cursor<Vec<u8>> = message.clone();
+            let node_id_val: Value = rmpv::decode::read_value(&mut message_mut).expect("failed to unwrap value");
+            let node_id: &[u8] = node_id_val.as_slice().expect("failed to extract slice");
+            let node_pk: Vec<u8> = node_id[1..node_id.len()].to_owned();
+            let signature_val: Value = rmpv::decode::read_value(&mut message_mut).expect("failed to unwrap value");
+            let signature: &[u8] = signature_val.as_slice().expect("failed to extract slice");
+            let message_val: Value = rmpv::decode::read_value(&mut message_mut).expect("failed to unwrap value");
+            let message: &[u8] = message_val.as_slice().expect("failed to extract slice");
+            
+            // next verify signature and message
+            let pk: PublicKey = ed25519_dalek::PublicKey::from_bytes(&node_pk)?;
+            let sig: Signature = Signature::try_from(signature).expect("failed to cast to signature");
+            pk.verify(message, &sig)?;
+            return Ok(SignedMessage{
+                message: message.to_owned(), 
+                node_id: P2PService::encode_node_id(node_id.to_owned())
+            }); 
+        }
         pub fn encode_node_id(node_id_bytes: Vec<u8>) -> String {
             return format!("{}{}", "z".to_owned(), bs58::encode(node_id_bytes).into_string());
         }
@@ -148,16 +197,7 @@ pub mod p2p {
                 let mut addr = ip;
                 addr.push_str(":");
                 addr.push_str(&port.to_string());
-                tokio::task::spawn(P2PService::on_new_peer(addr, peer_uri));
-                // let stream = TcpStream::connect(addr.clone());
-                // if stream.await.is.is_ok() {
-                //     println!("connecting to: {:?}", addr.clone());
-                //     println!("Connected to the server!");
-                //     tokio::task::spawn(P2PService::on_new_peer(listener.unwrap(), peer_uri));
-                // } else {
-                //     println!("connecting to: {:?}", addr);
-                //     println!("Couldn't connect to server...");
-                // }
+                tokio::task::spawn(P2PService::on_new_peer(addr, peer_uri,self.clone()));
             }
         }
     }
