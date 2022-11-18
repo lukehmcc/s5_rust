@@ -1,22 +1,28 @@
 pub mod node {
 
-    use crate::modules::{Config, P2PService};
+    use std::collections::HashMap;
+
+    use state::Storage;
+
+    use crate::modules::{Config, P2PService, p2p::p2p::Peer};
     pub struct Node{
         pub config: Config,
     }
     impl Node {
         pub async fn start_node(self) {
             // init p2p service
+            
+            // create mutable peer hashmap
+            let peers_hm_store: Storage<HashMap<String, Peer>> = state::Storage::new();
+            let peers_hm: HashMap<String, Peer> = HashMap::new();
+            peers_hm_store.set(peers_hm);
             let sled = sled::open(&self.config.database.path).expect("Open sled");
             let p2p: P2PService = P2PService{
+                peers: peers_hm_store.clone(),
                 config: self.config.clone(),
                 sled: sled.clone(),
             };
             p2p.init().await;
-            // store the config in sled in bincode so functions without the node/p2pservice 
-            // state can access it
-            let config_encoded: Vec<u8> = bincode::serialize(&self.config.clone()).expect("config failed to serialize");
-            sled.insert("config", config_encoded);
             
             // TODO implement cache cleaner
             let _cache_path = &self.config.cache.path;
@@ -27,6 +33,7 @@ pub mod node {
             }
             
             let p2p: P2PService = P2PService{
+                peers: peers_hm_store.clone(),
                 config: self.config.clone(),
                 sled: sled.clone(),
             };
